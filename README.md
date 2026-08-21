@@ -1,102 +1,50 @@
-# Pinnacle Server The **Pinnacle Server** is the central orchestration and data-collection backend for the Pinnacle IV&V (Independent Validation & Verification) tool suite. It exposes: - A **gRPC service** (`HalService`) for the embedded HAL Client App to submit test results and receive streaming commands.
-- A **REST/HTTP API** (`/api/v1`) for the Web UI and external tooling.
-- A **PostgreSQL** backend with versioned migrations.
-- **OTA firmware upgrade** orchestration.
-- **Prometheus metrics** (optional). --- ## 🚀 Quick Start (Docker — Recommended) **The easiest and most reliable way** to get started on any machine: ```bash
-cd docker
-./setup.sh
-``` This will:
-1. Check Docker prerequisites
-2. Create `.env` from `.env.example`
-3. Build the Docker image for your platform (auto-detected)
-4. Start PostgreSQL and dev environment
-5. You're ready to build! Then enter the container and build:
+# Pinnacle-Server
+
+## Project Summary
+
+Pinnacle-Server is the central C++ backend for Pinnacle hardware-validation runs.
+
+`cmd/pinnacle-server/main.cpp` starts the service. `src` and `internal` organize:
+
+- Configuration, logging, and database access.
+- Migration execution, repositories, services, and orchestration.
+- REST controllers and gRPC servers.
+
+CMake generates protobuf/gRPC sources, links Drogon, spdlog, OpenSSL, YAML, Argon2, and database dependencies, and builds the server plus unit and integration executables.
+
+`ClientServiceImpl` handles Client uplink and streamed run/result traffic. `HalServiceImpl` exposes direct HAL operations. REST routes serve the dashboard and external tooling, with SSE paths for live updates.
+
+Migrations cover devices, runs, results, logs, OTA, audit records, notifications, alerts, application settings, and result fields.
+
+Configuration uses `etc/pinnacle/server.toml` and `.env.example`; Docker Compose, devcontainer, local-install, and dependency documents describe supported environments.
+
+CMake discovers GoogleTest unit and integration tests and retains a compatibility `config-test`. The checked-in `AUDIT.md` reports 65 CTest entries, 64 passing and one migration test skipped when `PINNACLE_TEST_DSN` is absent, plus 63 unit tests passing. It identifies live REST/SSE and persistence-invariant validation as environment-dependent.
+
+The server has a broad implemented surface, but REST mode normalization handles wire strings and aliases rather than being a numeric HAL enum map. Database persistence differs between server-launched runs and the Client-side HAL path.
+
+These are limitations, not reasons to overstate verification. Run the native build and CTest. Then exercise REST, SSE, gRPC, migrations, authentication, and database behavior with isolated services and a real Client.
+
+## Feature Status
+
+| # | Name / Description | Implemented? | Test Coverage? | Manual Test |
+|---:|---|---|---|---|
+| 1 | C++ server startup, configuration, and logging | Yes | Native build and compatibility config test are wired | [ ] Manual verification required |
+| 2 | REST API controllers and SSE streams | Yes | Unit/integration targets exist; live stream emission is deferred | [ ] Manual verification required |
+| 3 | Bidirectional Client gRPC and HAL services | Yes | Backpressure and service tests exist; real Client link is unverified | [ ] Manual verification required |
+| 4 | Run orchestration, results, logs, and repositories | Yes | Service/repository unit coverage exists; deployment persistence needs testing | [ ] Manual verification required |
+| 5 | SQL migrations and database configuration | Yes | Migration runner skips without `PINNACLE_TEST_DSN` | [ ] Manual verification required |
+| 6 | OTA, alerts, notifications, settings, and audit records | Yes | Schema and service code exist; workflow coverage is partial | [ ] Manual verification required |
+| 7 | Docker, devcontainer, local install, and CI paths | Partial | Definitions and workflows exist; environment parity is unverified | [ ] Manual verification required |
+
+## Tests and Commands
+
 ```bash
-docker exec -it pinnacle-dev bash
-cmake --preset debug && cmake --build build/debug
-``` ### Alternative: VS Code Dev Container Open this project in VS Code and:
-1. Install the "Dev Containers" extension
-2. Press `F1` → "Dev Containers: Reopen in Container"
-3. Wait for build (first time takes ~10 min) Everything is configured automatically! See [docker/README.md](docker/README.md) for detailed Docker documentation. --- ## Architecture Overview ```
-HAL Client (embedded) ──gRPC (port 9090)──► HalServiceImpl │
-Web UI/ REST clients ──HTTP (port 8080)──► Drogon REST API │ ┌──────────┴──────────┐ │ Service Layer │ │ RunService │ │ LogService │ │ AuthService │ │ OtaService ... │ └──────────┬──────────┘ │ ┌──────────┴──────────┐ │ Repository Layer │ │ (Drogon ORM/ PG) │ └──────────┬──────────┘ │ PostgreSQL 15+
-``` --- ## Prerequisites (Native Build) **Note:** Using Docker (see Quick Start above) avoids all manual dependency installation. For native builds without Docker: | Tool | Version |
-|------|---------|
-| CMake | 3.22+ |
-| vcpkg | latest |
-| C++ compiler | GCC 12+ or Clang 16+ |
-| PostgreSQL | 15+ |
-| protoc + grpc_cpp_plugin | matching vcpkg grpc version | Set `VCPKG_ROOT` in your environment before building. --- ## Quick Start (Local Dev) ```bash
-cp .env.example .env
-# Edit .env — at minimum set PINNACLE_DB_* and PINNACLE_SESSION_SECRET # Start Postgres
-docker compose -f docker/docker-compose.yml up postgres -d # Build and run (loads .env automatically)
-./scripts/run_dev.sh
-``` Or with Docker Compose (full stack): ```bash
-docker compose -f docker/docker-compose.yml up --build
-``` --- ## Building ```bash
-# Debug (default dev preset)
-cmake --preset debug
-cmake --build build/debug # Release
-cmake --preset release
-cmake --build build/release # Run tests
-cmake --preset test
-cmake --build build/test
-ctest --test-dir build/test --output-on-failure # ASan
-cmake --preset asan
-cmake --build build/asan
-``` --- ## Configuration All configuration is via environment variables. See `.env.example` for the full list. | Variable | Default | Description |
-|----------|---------|-------------|
-| `PINNACLE_GRPC_LISTEN` | `0.0.0.0:9090` | gRPC bind address |
-| `PINNACLE_HTTP_LISTEN` | `0.0.0.0:8080` | HTTP bind address |
-| `PINNACLE_DB_HOST` | `localhost` | PostgreSQL host |
-| `PINNACLE_DB_NAME` | `pinnacle` | Database name |
-| `PINNACLE_DB_USER` | `pinnacle` | DB username |
-| `PINNACLE_DB_PASSWORD` | *(required)* | DB password |
-| `PINNACLE_SESSION_SECRET` | *(required, ≥32 chars)* | Session signing key |
-| `PINNACLE_REGISTRY_PATH` | `registry.yaml` | Module registry YAML |
-| `PINNACLE_OTA_STORAGE_PATH` | `/var/pinnacle/ota` | OTA artifact directory |
-| `PINNACLE_LOG_LEVEL` | `info` | Log level (trace/debug/info/warn/error) | --- ## Module Registry Modules are declared in a YAML file (path set by `PINNACLE_REGISTRY_PATH`): ```yaml
-modules: - id: "com.example.temperature" name: "Temperature Monitor" description: "Reads temperature from sensor A" version: "1.2.0" result_type_url: "type.googleapis.com/pinnacle.TempResult" config_type_url: "type.googleapis.com/pinnacle.TempConfig" modes: ["single_shot", "monitoring"]
-``` --- ## Database Migrations SQL migration files live in `migrations/`. They are applied automatically at startup in alphabetical order. Migrations are idempotent (tracked in `schema_migrations`). To add a new migration, create `migrations/NNNN_description.sql`. --- ## API All protected endpoints require either:
-- A session cookie (from `POST/api/v1/auth/login`), or
-- An `Authorization: Bearer <token>` header. ### Key endpoints | Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/health` | Health check |
-| POST | `/api/v1/auth/login` | Login → sets session |
-| POST | `/api/v1/auth/tokens` | Create API token |
-| GET | `/api/v1/modules` | List test modules |
-| POST | `/api/v1/runs` | Start a test run |
-| GET | `/api/v1/runs/{id}` | Get run details |
-| GET | `/api/v1/runs/{id}/logs` | List run logs |
-| GET | `/api/v1/runs/{id}/logs/tail` | SSE live log tail |
-| GET | `/api/v1/target` | Get board info |
-| POST | `/api/v1/target/heartbeat` | Board heartbeat |
-| POST | `/api/v1/ota/upload` | Upload OTA artifact |
-| POST | `/api/v1/ota/{id}/trigger` | Trigger OTA upgrade | --- ## Decisions Log | Decision | Rationale |
-|----------|-----------|
-| gRPC sync API for unary, streaming wait-loop | Simpler than async CQ for initial impl; async CQ adds complexity without benefit at this scale |
-| Drogon for REST | Built-in PG ORM, async, WebSocket, SSE, session management |
-| argon2id for passwords | OWASP recommended |
-| SHA-256 for API tokens | Tokens are long random strings; SHA-256 is fast and sufficient |
-| 1-minute minimum cron resolution | Full cron parser adds a dependency; document the limitation |
-| Single `board` row (unique partial index) | The system targets exactly one physical test board |
-| Migrations at startup | Ensures schema is always up to date; no separate migration tool needed |
-| vcpkg manifest mode | Reproducible dependency pinning per repo | ## Build ```sh
-cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build -j$(nproc)
-``` Binary: `build/pinnacle-server` ## Run (dev) ```sh
-./build/pinnacle-server --config etc/pinnacle/server.toml --log-level debug
-``` Without a config file the binary starts with compiled-in defaults. ## Test ```sh
-cmake --build build --target config-test
-ctest --test-dir build --output-on-failure
-``` ## Config Default path: `/etc/pinnacle/server.toml`. See `etc/pinnacle/server.toml` for all keys and defaults. CLI flags override file values: | Flag | Default |
-|------|---------|
-| `--config PATH` | `/etc/pinnacle/server.toml` |
-| `--log-level LEVEL` | `info` | ## Implementation Status | Step | Status |
-|------|--------|
-| 1 · Skeleton + config + logger | ✓ done |
-| 2 · DB layer + migrations | — |
-| 3 · DB CRUD (runs + batches) | — |
-| 4 · Ingest queue + result writer | — |
-| 5 · gRPC bidi server | — |
-| … | — |
+cmake -S . -B build/native
+cmake --build build/native
+cd build/native && ctest --output-on-failure
+```
+
+## Limitations
+
+- The baseline includes one skipped DSN-dependent migration test.
+- Live REST/SSE, migrations, authentication, and Client/Server interoperability require configured services.
