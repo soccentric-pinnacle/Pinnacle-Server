@@ -39,9 +39,8 @@ These are limitations, not reasons to overstate verification. Run the native bui
 ## Tests and Commands
 
 ```bash
-cmake -S . -B build/native
-cmake --build build/native
-cd build/native && ctest --output-on-failure
+make build          # Docker x86 build (server image)
+make test           # ctest inside Docker
 ```
 
 ## Limitations
